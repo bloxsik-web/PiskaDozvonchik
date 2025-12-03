@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>🚀 ЗВОНКИ ДЛЯ ГЧ</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a0a;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            text-align: center;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #00ff00;
+            margin: 20px 0;
+            text-shadow: 0 0 10px #00ff00;
+        }
+        .room-input {
+            background: #111;
+            padding: 30px;
+            border-radius: 10px;
+            border: 2px solid #00ff00;
+            margin: 20px 0;
+        }
+        input {
+            width: 80%;
+            padding: 15px;
+            margin: 10px 0;
+            background: #000;
+            border: 2px solid #00ff00;
+            color: #00ff00;
+            font-size: 16px;
+            border-radius: 5px;
+        }
+        button {
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 15px 30px;
+            margin: 10px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: 0.3s;
+        }
+        button:hover {
+            background: #00cc00;
+            transform: scale(1.05);
+        }
+        .call-container {
+            display: none;
+            margin-top: 30px;
+        }
+        .videos {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin: 30px 0;
+        }
+        video {
+            width: 45%;
+            max-width: 400px;
+            border: 3px solid #00ff00;
+            border-radius: 10px;
+            background: #000;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        .control-btn {
+            background: #333;
+            color: #00ff00;
+            padding: 10px 20px;
+            margin: 5px;
+        }
+        #userList {
+            background: #111;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            min-height: 100px;
+            border: 1px solid #00ff00;
+        }
+        #log {
+            background: #000;
+            color: #888;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 20px;
+            font-size: 12px;
+            text-align: left;
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 ЗВОНКИ ДЛЯ ГЧ</h1>
+        <p>Работает через GitHub Pages + бесплатный сигналинг сервер</p>
+        
+        <!-- Экран входа -->
+        <div id="loginScreen" class="room-input">
+            <h2>ВХОД В КОМНАТУ</h2>
+            <input type="text" id="username" placeholder="Твой ник (например: Вася_из_ГЧ)" />
+            <br>
+            <input type="text" id="roomName" placeholder="Название комнаты (например: gostinka-228)" />
+            <br>
+            <button onclick="joinRoom()">✅ ВОЙТИ В КОМНАТУ</button>
+        </div>
+        
+        <!-- Экран звонка -->
+        <div id="callScreen" class="call-container">
+            <h2>🟢 ВЫ В КОМНАТЕ: <span id="currentRoomName"></span></h2>
+            
+            <div class="videos">
+                <video id="localVideo" autoplay muted playsinline></video>
+                <video id="remoteVideo" autoplay playsinline></video>
+            </div>
+            
+            <div class="controls">
+                <button class="control-btn" onclick="toggleMute()">🎤 ВКЛ/ВЫКЛ МИКРОФОН</button>
+                <button class="control-btn" onclick="toggleVideo()">📹 ВКЛ/ВЫКЛ КАМЕРУ</button>
+                <button onclick="copyRoomLink()">📋 СКОПИРОВАТЬ ССЫЛКУ ДЛЯ ДРУГА</button>
+                <button style="background: #ff0000; color: white;" onclick="leaveRoom()">⛔ ВЫЙТИ ИЗ КОМНАТЫ</button>
+            </div>
+            
+            <div>
+                <h3>👥 УЧАСТНИКИ В КОМНАТЕ:</h3>
+                <div id="userList">Ожидание подключения...</div>
+            </div>
+            
+            <div id="log"></div>
+        </div>
+    </div>
+
+    <!-- Подключаем библиотеки -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.0/socket.io.min.js"></script>
+    <script>
+        // Настройки - используем бесплатный публичный сервер для сигналинга
+        const SIGNALING_SERVER = 'https://signaling.dtlab.xyz';
+        // Альтернативный сервер (если первый не работает):
+        // const SIGNALING_SERVER = 'https://webrtc-signaling.herokuapp.com/';
+        
+        // Глобальные переменные
+        let socket;
+        let localStream;
+        let peerConnections = {};
+        let currentRoom = '';
+        let username = '';
+        
+        // Логирование в интерфейс
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            logDiv.innerHTML += `[${new Date().toLocaleTimeString()}] ${message}<br>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        // Войти в комнату
+        async function joinRoom() {
+            username = document.getElementById('username').value.trim();
+            currentRoom = document.getElementById('roomName').value.trim();
+            
+            if (!username || !currentRoom) {
+                alert('Введи ник и название комнаты!');
+                return;
+            }
+            
+            log(`Подключение к комнате: ${currentRoom} как ${username}...`);
+            
+            // Подключаемся к сигналинг серверу
+            socket = io(SIGNALING_SERVER);
+            
+            // Обработчики событий socket.io
+            socket.on('connect', () => {
+                log('✅ Подключились к сигналинг серверу');
+                socket.emit('join', { room: currentRoom, username: username });
+            });
+            
+            socket.on('joined', (data) => {
+                log(`✅ Вошли в комнату: ${data.room}`);
+                document.getElementById('currentRoomName').textContent = data.room;
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('callScreen').style.display = 'block';
+                
+                // Обновляем список пользователей
+                updateUserList(data.users);
+                
+                // Получаем медиапоток
+                startLocalMedia();
+            });
+            
+            socket.on('user_joined', (data) => {
+                log(`👋 Пользователь присоединился: ${data.username}`);
+                updateUserList(data.users);
+                
+                // Если мы уже в комнате, создаем предложение для нового пользователя
+                if (localStream) {
+                    createOffer(data.userId);
+                }
+            });
+            
+            socket.on('user_left', (data) => {
+                log(`👋 Пользователь вышел: ${data.username}`);
+                updateUserList(data.users);
+                
+                // Закрываем соединение с вышедшим пользователем
+                if (peerConnections[data.userId]) {
+                    peerConnections[data.userId].close();
+                    delete peerConnections[data.userId];
+                }
+            });
+            
+            socket.on('offer', async (data) => {
+                log(`📨 Получено предложение от ${data.from}`);
+                await handleOffer(data);
+            });
+            
+            socket.on('answer', async (data) => {
+                log(`📨 Получен ответ от ${data.from}`);
+                await handleAnswer(data);
+            });
+            
+            socket.on('ice_candidate', async (data) => {
+                log(`❄️ Получен ICE кандидат от ${data.from}`);
+                await handleICECandidate(data);
+            });
+            
+            socket.on('connect_error', (error) => {
+                log(`❌ Ошибка подключения: ${error.message}`);
+                alert('Не удалось подключиться к серверу. Попробуй обновить страницу.');
+            });
+        }
+        
+        // Запускаем локальную камеру и микрофон
+        async function startLocalMedia() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: true
+                });
+                
+                document.getElementById('localVideo').srcObject = localStream;
+                log('✅ Камера и микрофон активированы');
+            } catch (error) {
+                log(`❌ Ошибка доступа к медиа: ${error.message}`);
+                alert('Нужно разрешить доступ к камере и микрофону!');
+            }
+        }
+        
+        // Создаем WebRTC предложение
+        async function createOffer(targetUserId) {
+            log(`Создание предложения для ${targetUserId}...`);
+            
+            const pc = new RTCPeerConnection({
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]
+            });
+            
+            // Сохраняем соединение
+            peerConnections[targetUserId] = pc;
+            
+            // Добавляем локальный поток
+            localStream.getTracks().forEach(track => {
+                pc.addTrack(track, localStream);
+            });
+            
+            // Обработка удаленного потока
+            pc.ontrack = (event) => {
+                log(`📹 Получен удаленный поток от ${targetUserId}`);
+                document.getElementById('remoteVideo').srcObject = event.streams[0];
+            };
+            
+            // Собираем ICE кандидаты
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('ice_candidate', {
+                        to: targetUserId,
+                        candidate: event.candidate,
+                        room: currentRoom
+                    });
+                }
+            };
+            
+            // Создаем предложение
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                socket.emit('offer', {
+                    to: targetUserId,
+                    offer: offer,
+                    room: currentRoom
+                });
+                
+                log(`✅ Предложение отправлено ${targetUserId}`);
+            } catch (error) {
+                log(`❌ Ошибка создания предложения: ${error}`);
+            }
+        }
+        
+        // Обработка входящего предложения
+        async function handleOffer(data) {
+            const pc = new RTCPeerConnection({
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]
+            });
+            
+            peerConnections[data.from] = pc;
+            
+            // Добавляем локальный поток
+            if (localStream) {
+                localStream.getTracks().forEach(track => {
+                    pc.addTrack(track, localStream);
+                });
+            }
+            
+            pc.ontrack = (event) => {
+                log(`📹 Получен удаленный поток от ${data.from}`);
+                document.getElementById('remoteVideo').srcObject = event.streams[0];
+            };
+            
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('ice_candidate', {
+                        to: data.from,
+                        candidate: event.candidate,
+                        room: currentRoom
+                    });
+                }
+            };
+            
+            try {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                
+                socket.emit('answer', {
+                    to: data.from,
+                    answer: answer,
+                    room: currentRoom
+                });
+                
+                log(`✅ Ответ отправлен ${data.from}`);
+            } catch (error) {
+                log(`❌ Ошибка обработки предложения: ${error}`);
+            }
+        }
+        
+        // Обработка ответа
+        async function handleAnswer(data) {
+            const pc = peerConnections[data.from];
+            if (pc) {
+                try {
+                    await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                    log(`✅ Соединение установлено с ${data.from}`);
+                } catch (error) {
+                    log(`❌ Ошибка обработки ответа: ${error}`);
+                }
+            }
+        }
+        
+        // Обработка ICE кандидатов
+        async function handleICECandidate(data) {
+            const pc = peerConnections[data.from];
+            if (pc && data.candidate) {
+                try {
+                    await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                } catch (error) {
+                    log(`❌ Ошибка добавления ICE кандидата: ${error}`);
+                }
+            }
+        }
+        
+        // Обновление списка пользователей
+        function updateUserList(users) {
+            const userListDiv = document.getElementById('userList');
+            userListDiv.innerHTML = '';
+            
+            users.forEach(user => {
+                const userDiv = document.createElement('div');
+                userDiv.textContent = `${user.username} ${user.id === socket.id ? '(Вы)' : ''}`;
+                userDiv.style.padding = '5px';
+                userDiv.style.borderBottom = '1px solid #333';
+                userListDiv.appendChild(userDiv);
+            });
+        }
+        
+        // Управление медиа
+        function toggleMute() {
+            if (localStream) {
+                const audioTrack = localStream.getAudioTracks()[0];
+                if (audioTrack) {
+                    audioTrack.enabled = !audioTrack.enabled;
+                    log(`Микрофон: ${audioTrack.enabled ? 'ВКЛ' : 'ВЫКЛ'}`);
+                }
+            }
+        }
+        
+        function toggleVideo() {
+            if (localStream) {
+                const videoTrack = localStream.getVideoTracks()[0];
+                if (videoTrack) {
+                    videoTrack.enabled = !videoTrack.enabled;
+                    log(`Камера: ${videoTrack.enabled ? 'ВКЛ' : 'ВЫКЛ'}`);
+                }
+            }
+        }
+        
+        // Копирование ссылки
+        function copyRoomLink() {
+            const link = `${window.location.origin}?room=${currentRoom}`;
+            navigator.clipboard.writeText(link).then(() => {
+                alert(`Ссылка скопирована! Отправь другу: ${link}`);
+            });
+        }
+        
+        // Выход из комнаты
+        function leaveRoom() {
+            if (socket) {
+                socket.emit('leave', { room: currentRoom });
+                socket.disconnect();
+            }
+            
+            // Останавливаем все медиапотоки
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+            
+            // Закрываем все PeerConnection
+            Object.values(peerConnections).forEach(pc => pc.close());
+            peerConnections = {};
+            
+            // Возвращаемся на экран входа
+            document.getElementById('callScreen').style.display = 'none';
+            document.getElementById('loginScreen').style.display = 'block';
+            
+            log('Вышли из комнаты');
+        }
+        
+        // Автовход при наличии room в URL
+        window.onload = function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const room = urlParams.get('room');
+            if (room) {
+                document.getElementById('roomName').value = room;
+            }
+        };
+    </script>
+</body>
+</html>
